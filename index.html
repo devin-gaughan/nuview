@@ -112,7 +112,7 @@ function drawPlane(canvas, d, particles, meta, planeIdx) {
   // frame, ticks, labels
   ctx.strokeStyle = "#3a2a63"; ctx.lineWidth = dpr;
   ctx.strokeRect(mL, mT, W, H);
-  ctx.fillStyle = "#9a8fb8"; ctx.font = `${10 * dpr}px system-ui`;
+  ctx.fillStyle = "#c9bfe0"; ctx.font = `${12 * dpr}px system-ui`;
   ctx.textAlign = "center"; ctx.textBaseline = "top";
   for (const v of ticks(wmin, wmax, 8)) {
     ctx.fillRect(X(v) - 0.5 * dpr, mT + H, dpr, 4 * dpr);
@@ -234,6 +234,47 @@ function draw3D(data) {
   ctx.beginPath(); ctx.arc(v[0], v[1], 4 * devicePixelRatio, 0, 7); ctx.fill();
   ctx.strokeStyle = "#FFD54F"; ctx.lineWidth = devicePixelRatio;
   ctx.beginPath(); ctx.arc(v[0], v[1], 8 * devicePixelRatio, 0, 7); ctx.stroke();
+
+  const dpr = devicePixelRatio;
+  ctx.font = `${12 * dpr}px system-ui`;
+  // dimension labels on detector box edges
+  ctx.fillStyle = "rgba(201,191,224,0.75)";
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  const mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  const m1 = mid(proj(B[0]), proj(B[4]));
+  ctx.fillText("10.4 m (z, beam →)", m1[0], m1[1] - 10 * dpr);
+  const m2 = mid(proj(B[0]), proj(B[1]));
+  ctx.fillText("2.6 m (x, drift)", m2[0], m2[1] + 12 * dpr);
+  const m3 = mid(proj(B[1]), proj(B[2]));
+  ctx.fillText("2.3 m (y)", m3[0] + 30 * dpr, m3[1]);
+  // corner orientation triad (rotation only, fixed screen position)
+  const tox = cv.width - 64 * dpr, toy = cv.height - 56 * dpr, tl = 30 * dpr;
+  const rot = ([x, y, z]) => {
+    const x1 = x * cy + z * sy, z1 = -x * sy + z * cy;
+    return [x1, y * cx - z1 * sx];
+  };
+  const axes = [
+    ["x", [1, 0, 0], "#E91E63"], ["y", [0, 1, 0], "#64DD17"], ["z", [0, 0, 1], "#4FC3F7"]
+  ];
+  ctx.lineWidth = 1.5 * dpr;
+  for (const [nm, vec, col] of axes) {
+    const [ax, ay] = rot(vec);
+    ctx.strokeStyle = col; ctx.fillStyle = col;
+    ctx.beginPath(); ctx.moveTo(tox, toy);
+    ctx.lineTo(tox + ax * tl, toy - ay * tl); ctx.stroke();
+    ctx.fillText(nm, tox + ax * (tl + 9 * dpr), toy - ay * (tl + 9 * dpr));
+  }
+  // scale bar: pick a nice length in cm that maps to a reasonable pixel width
+  const targets = [10, 25, 50, 100, 200, 500, 1000];
+  const cmLen = targets.find(t => t * S >= 70 * dpr) || 1000;
+  const bx = 16 * dpr, by = cv.height - 20 * dpr, bw = cmLen * S;
+  ctx.strokeStyle = "#F5F1E8"; ctx.lineWidth = 2 * dpr;
+  ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx + bw, by); ctx.stroke();
+  ctx.lineWidth = dpr;
+  ctx.beginPath(); ctx.moveTo(bx, by - 4 * dpr); ctx.lineTo(bx, by + 4 * dpr);
+  ctx.moveTo(bx + bw, by - 4 * dpr); ctx.lineTo(bx + bw, by + 4 * dpr); ctx.stroke();
+  ctx.fillStyle = "#F5F1E8"; ctx.textAlign = "left"; ctx.textBaseline = "bottom";
+  ctx.fillText(cmLen >= 100 ? (cmLen / 100) + " m" : cmLen + " cm", bx, by - 6 * dpr);
 }
 
 const c3d = document.getElementById("c3d");
