@@ -35,6 +35,8 @@ def extract(path, event_index, out_path):
             "lep_energy_gev": float(ev["lep_energy"][event_index, 0]),
             "is_cc": bool(ev["is_cc"][event_index, 0]),
             "nu_vtx_cm": [float(x) for x in ev["nu_vtx"][event_index]],
+            "nu_vtx_wire_pos": [int(x) for x in ev["nu_vtx_wire_pos"][event_index]],
+            "nu_vtx_wire_time": float(ev["nu_vtx_wire_time"][event_index, 0]),
         }
         # --- truth: map hit_id -> g4_id via edep_table (best energy match) ---
         ed = f["edep_table"]

@@ -35,6 +35,7 @@
   <button id="bTruth">Truth</button>
   <button id="b2d" class="on">2D Planes</button>
   <button id="b3d">3D</button>
+  <button id="bPng">Export PNG</button>
 </div>
 <div id="legend"></div>
 <div id="view2d">
@@ -79,25 +80,66 @@ const CAT = [
 const COSMIC_RGB = [95, 105, 130];
 function pcat(pdg) { return CAT.find(c => c.test(pdg)); }
 
-function drawPlane(canvas, d, particles) {
+function minmax(a) {
+  let lo = a[0], hi = a[0];
+  for (let i = 1; i < a.length; i++) { if (a[i] < lo) lo = a[i]; if (a[i] > hi) hi = a[i]; }
+  return [lo, hi];
+}
+function ticks(lo, hi, n) {
+  const span = hi - lo || 1, raw = span / n;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = [1, 2, 5, 10].map(m => m * mag).find(s => span / s <= n) || 10 * mag;
+  const out = [];
+  for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) out.push(v);
+  return out;
+}
+
+function drawPlane(canvas, d, particles, meta, planeIdx) {
+  const dpr = devicePixelRatio;
   const ctx = canvas.getContext("2d");
-  canvas.width = canvas.clientWidth * devicePixelRatio;
-  canvas.height = 220 * devicePixelRatio;
+  canvas.style.height = "250px";
+  canvas.width = canvas.clientWidth * dpr;
+  canvas.height = 250 * dpr;
   ctx.fillStyle = "#120a24";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   if (!d || d.wire.length === 0) return;
-  const pad = 8 * devicePixelRatio;
-  const W = canvas.width - 2 * pad, H = canvas.height - 2 * pad;
-  const wmin = Math.min(...d.wire), wmax = Math.max(...d.wire);
-  const tmin = Math.min(...d.time), tmax = Math.max(...d.time);
+  const mL = 54 * dpr, mB = 32 * dpr, mT = 8 * dpr, mR = 10 * dpr;
+  const W = canvas.width - mL - mR, H = canvas.height - mT - mB;
+  const [wmin, wmax] = minmax(d.wire);
+  const [tmin, tmax] = minmax(d.time);
+  const X = w => mL + (w - wmin) / (wmax - wmin || 1) * W;
+  const Y = t => mT + (1 - (t - tmin) / (tmax - tmin || 1)) * H;
+  // frame, ticks, labels
+  ctx.strokeStyle = "#3a2a63"; ctx.lineWidth = dpr;
+  ctx.strokeRect(mL, mT, W, H);
+  ctx.fillStyle = "#9a8fb8"; ctx.font = `${10 * dpr}px system-ui`;
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  for (const v of ticks(wmin, wmax, 8)) {
+    ctx.fillRect(X(v) - 0.5 * dpr, mT + H, dpr, 4 * dpr);
+    ctx.fillText(v, X(v), mT + H + 6 * dpr);
+  }
+  ctx.textAlign = "right"; ctx.textBaseline = "middle";
+  for (const v of ticks(tmin, tmax, 5)) {
+    ctx.fillRect(mL - 4 * dpr, Y(v) - 0.5 * dpr, 4 * dpr, dpr);
+    ctx.fillText(v, mL - 6 * dpr, Y(v));
+  }
+  ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+  ctx.fillText("wire number", mL + W / 2, canvas.height - 3 * dpr);
+  ctx.save();
+  ctx.translate(11 * dpr, mT + H / 2); ctx.rotate(-Math.PI / 2);
+  ctx.textBaseline = "top";
+  ctx.fillText("drift time (ticks)", 0, 0);
+  ctx.restore();
   // charge scale: clip at 97th percentile so one bright hit doesn't wash out the rest
   const sorted = [...d.charge].sort((a, b) => a - b);
   const qhi = sorted[Math.floor(sorted.length * 0.97)] || 1;
   const qlo = sorted[0];
-  const px = Math.max(1.2 * devicePixelRatio, W / (wmax - wmin + 1));
+  const px = Math.max(1.2 * dpr, W / (wmax - wmin + 1));
+  ctx.save();
+  ctx.beginPath(); ctx.rect(mL, mT, W, H); ctx.clip();
   for (let i = 0; i < d.wire.length; i++) {
-    const x = pad + (d.wire[i] - wmin) / (wmax - wmin || 1) * W;
-    const y = pad + (1 - (d.time[i] - tmin) / (tmax - tmin || 1)) * H;
+    const x = X(d.wire[i]);
+    const y = Y(d.time[i]);
     const q = Math.min(1, Math.max(0, (d.charge[i] - qlo) / (qhi - qlo || 1)));
     let r, g, b, alpha;
     if (colorMode === "truth" && d.truth) {
@@ -110,6 +152,17 @@ function drawPlane(canvas, d, particles) {
     ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
     ctx.fillRect(x, y, px, px);
   }
+  // true neutrino vertex crosshair (per-plane wire coordinates)
+  if (meta && meta.nu_vtx_wire_pos) {
+    const x = X(meta.nu_vtx_wire_pos[planeIdx]), y = Y(meta.nu_vtx_wire_time);
+    ctx.strokeStyle = "rgba(255,213,79,0.9)"; ctx.lineWidth = dpr;
+    ctx.beginPath();
+    ctx.moveTo(x - 11 * dpr, y); ctx.lineTo(x + 11 * dpr, y);
+    ctx.moveTo(x, y - 11 * dpr); ctx.lineTo(x, y + 11 * dpr);
+    ctx.stroke();
+    ctx.beginPath(); ctx.arc(x, y, 6 * dpr, 0, 7); ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function render(data) {
@@ -120,15 +173,19 @@ function render(data) {
     `${m.is_cc ? "CC" : "NC"} · Eν = ${m.nu_energy_gev.toFixed(2)} GeV · ` +
     `vertex (${m.nu_vtx_cm.map(v => v.toFixed(0)).join(", ")}) cm · ` +
     `${["0","1","2"].reduce((n,p) => n + data.planes[p].wire.length, 0)} hits`;
-  document.getElementById("legend").innerHTML = colorMode === "truth"
+  document.getElementById("legend").innerHTML = (colorMode === "truth"
     ? CAT.map(c => `<span style="color:rgb(${c.rgb})">■ ${c.name}</span>`).join("")
       + `<span style="color:rgb(${COSMIC_RGB})">■ cosmic/data</span>`
-    : "color = deposited charge";
+    : `<span>charge (ADC integral, 97th-pct clip)</span>` +
+      `<span style="display:inline-block;width:140px;height:9px;vertical-align:middle;` +
+      `border-radius:3px;background:linear-gradient(90deg,#1A0B3D,#6A1B9A 35%,` +
+      `#00E5D0 65%,#FFD54F 85%,#F5F1E8)"></span><span>low → high</span>`)
+    + `<span style="color:#FFD54F">⊕ true ν vertex</span>`;
   document.getElementById("view2d").style.display = viewMode === "2d" ? "" : "none";
   document.getElementById("view3d").style.display = viewMode === "3d" ? "" : "none";
   if (viewMode === "2d")
     for (const p of ["0", "1", "2"])
-      drawPlane(document.getElementById("c" + p), data.planes[p], data.particles);
+      drawPlane(document.getElementById("c" + p), data.planes[p], data.particles, data.meta, +p);
   else draw3D(data);
   window._last = data;
 }
@@ -203,6 +260,31 @@ document.getElementById("bCharge").onclick = () => setMode("bCharge","bTruth", (
 document.getElementById("bTruth").onclick = () => setMode("bTruth","bCharge", () => colorMode="truth");
 document.getElementById("b2d").onclick = () => setMode("b2d","b3d", () => viewMode="2d");
 document.getElementById("b3d").onclick = () => setMode("b3d","b2d", () => viewMode="3d");
+
+document.getElementById("bPng").onclick = () => {
+  if (!window._last) return;
+  const dpr = devicePixelRatio;
+  const src = viewMode === "2d"
+    ? ["c0", "c1", "c2"].map(id => document.getElementById(id))
+    : [document.getElementById("c3d")];
+  const w = Math.max(...src.map(c => c.width));
+  const header = 36 * dpr;
+  const h = header + src.reduce((s, c) => s + c.height + 8 * dpr, 0);
+  const out = document.createElement("canvas");
+  out.width = w; out.height = h;
+  const ctx = out.getContext("2d");
+  ctx.fillStyle = "#0A0514"; ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = "#F5F1E8"; ctx.font = `${13 * dpr}px system-ui`;
+  ctx.fillText("NuView · " + document.getElementById("meta").textContent,
+               10 * dpr, 22 * dpr);
+  let y = header;
+  for (const c of src) { ctx.drawImage(c, 0, y); y += c.height + 8 * dpr; }
+  const a = document.createElement("a");
+  const m = window._last.meta;
+  a.download = `nuview_ev${m.event_index}_${viewMode}_${colorMode}.png`;
+  a.href = out.toDataURL("image/png");
+  a.click();
+};
 
 const store = [];
 function addEvent(data) {
