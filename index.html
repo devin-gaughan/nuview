@@ -15,18 +15,39 @@
   #drop { border:1px dashed #6A1B9A; border-radius:8px; padding:10px 14px;
           font-size:13px; color:#c9bfe0; margin-bottom:14px; }
   input[type=file] { color:#c9bfe0; font-size:13px; }
+  #bar button { background:#1A0B3D; color:#c9bfe0; border:1px solid #6A1B9A;
+    border-radius:5px; padding:4px 12px; margin-right:6px; font-size:12px;
+    cursor:pointer; }
+  #bar button.on { background:#6A1B9A; color:#F5F1E8; }
+  #bar { margin-bottom:12px; }
+  #legend { font-size:11px; color:#9a8fb8; margin-bottom:8px; }
+  #legend span { margin-right:12px; }
+  #view3d canvas { height:520px; cursor:grab; }
 </style>
 </head>
 <body>
 <h1>NUVIEW · LArTPC EVENT DISPLAY</h1>
 <div id="meta">Load an event JSON produced by extract_event.py</div>
 <div id="drop">Drop event JSON here or <input type="file" id="file" accept=".json"></div>
+<div id="bar">
+  <button id="bCharge" class="on">Charge</button>
+  <button id="bTruth">Truth</button>
+  <button id="b2d" class="on">2D Planes</button>
+  <button id="b3d">3D</button>
+</div>
+<div id="legend"></div>
+<div id="view2d">
 <div class="plane"><label>Plane 0 (induction U) — wire vs drift time</label>
   <canvas id="c0" height="220"></canvas></div>
 <div class="plane"><label>Plane 1 (induction V) — wire vs drift time</label>
   <canvas id="c1" height="220"></canvas></div>
 <div class="plane"><label>Plane 2 (collection Y) — wire vs drift time</label>
   <canvas id="c2" height="220"></canvas></div>
+</div>
+<div id="view3d" style="display:none">
+  <label style="font-size:12px;color:#FFD54F">True particle trajectories — drag to orbit, wheel to zoom</label>
+  <canvas id="c3d" height="520"></canvas>
+</div>
 <script>
 "use strict";
 // Charge colormap: void -> violet -> teal -> gold -> ivory
@@ -45,7 +66,19 @@ function cmap(t) {
   return stops[stops.length - 1][1];
 }
 
-function drawPlane(canvas, d) {
+let colorMode = "charge", viewMode = "2d";
+const CAT = [
+  { name: "e±",  test: p => Math.abs(p) === 11,   rgb: [0, 229, 208] },
+  { name: "μ±",  test: p => Math.abs(p) === 13,   rgb: [186, 104, 255] },
+  { name: "γ",   test: p => p === 22,             rgb: [255, 213, 79] },
+  { name: "p",   test: p => p === 2212,           rgb: [233, 30, 99] },
+  { name: "π±",  test: p => Math.abs(p) === 211,  rgb: [100, 221, 23] },
+  { name: "other", test: () => true,              rgb: [255, 138, 101] },
+];
+const COSMIC_RGB = [95, 105, 130];
+function pcat(pdg) { return CAT.find(c => c.test(pdg)); }
+
+function drawPlane(canvas, d, particles) {
   const ctx = canvas.getContext("2d");
   canvas.width = canvas.clientWidth * devicePixelRatio;
   canvas.height = 220 * devicePixelRatio;
@@ -65,8 +98,15 @@ function drawPlane(canvas, d) {
     const x = pad + (d.wire[i] - wmin) / (wmax - wmin || 1) * W;
     const y = pad + (1 - (d.time[i] - tmin) / (tmax - tmin || 1)) * H;
     const q = Math.min(1, Math.max(0, (d.charge[i] - qlo) / (qhi - qlo || 1)));
-    const [r, g, b] = cmap(q);
-    ctx.fillStyle = `rgba(${r},${g},${b},${0.35 + 0.65 * q})`;
+    let r, g, b, alpha;
+    if (colorMode === "truth" && d.truth) {
+      const slot = d.truth[i];
+      if (slot < 0) { [r, g, b] = COSMIC_RGB; alpha = 0.18; }
+      else { [r, g, b] = pcat(particles[slot].pdg).rgb; alpha = 0.9; }
+    } else {
+      [r, g, b] = cmap(q); alpha = 0.35 + 0.65 * q;
+    }
+    ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
     ctx.fillRect(x, y, px, px);
   }
 }
@@ -79,10 +119,89 @@ function render(data) {
     `${m.is_cc ? "CC" : "NC"} · Eν = ${m.nu_energy_gev.toFixed(2)} GeV · ` +
     `vertex (${m.nu_vtx_cm.map(v => v.toFixed(0)).join(", ")}) cm · ` +
     `${["0","1","2"].reduce((n,p) => n + data.planes[p].wire.length, 0)} hits`;
-  for (const p of ["0", "1", "2"])
-    drawPlane(document.getElementById("c" + p), data.planes[p]);
+  document.getElementById("legend").innerHTML = colorMode === "truth"
+    ? CAT.map(c => `<span style="color:rgb(${c.rgb})">■ ${c.name}</span>`).join("")
+      + `<span style="color:rgb(${COSMIC_RGB})">■ cosmic/data</span>`
+    : "color = deposited charge";
+  document.getElementById("view2d").style.display = viewMode === "2d" ? "" : "none";
+  document.getElementById("view3d").style.display = viewMode === "3d" ? "" : "none";
+  if (viewMode === "2d")
+    for (const p of ["0", "1", "2"])
+      drawPlane(document.getElementById("c" + p), data.planes[p], data.particles);
+  else draw3D(data);
   window._last = data;
 }
+
+// --- minimal 3D: orthographic projection with drag-orbit, no dependencies ---
+let rotY = 0.6, rotX = 0.35, zoom = 1;
+function draw3D(data) {
+  const cv = document.getElementById("c3d"), ctx = cv.getContext("2d");
+  cv.width = cv.clientWidth * devicePixelRatio;
+  cv.height = 520 * devicePixelRatio;
+  ctx.fillStyle = "#120a24"; ctx.fillRect(0, 0, cv.width, cv.height);
+  const ps = data.particles.filter(p => p.n_hits >= 5 || p.mom_gev > 0.1);
+  if (!ps.length) return;
+  const ctr = data.meta.nu_vtx_cm;
+  const cy = Math.cos(rotY), sy = Math.sin(rotY);
+  const cx = Math.cos(rotX), sx = Math.sin(rotX);
+  const S = Math.min(cv.width, cv.height) / 600 * zoom * devicePixelRatio;
+  const proj = v => {
+    const x = v[0] - ctr[0], y = v[1] - ctr[1], z = v[2] - ctr[2];
+    const x1 = x * cy + z * sy, z1 = -x * sy + z * cy;
+    const y1 = y * cx - z1 * sx;
+    return [cv.width / 2 + x1 * S, cv.height / 2 - y1 * S];
+  };
+  // detector outline (MicroBooNE active volume, cm)
+  ctx.strokeStyle = "rgba(106,27,154,0.5)"; ctx.lineWidth = devicePixelRatio;
+  const B = [[0,-116,0],[256,-116,0],[256,116,0],[0,116,0],
+             [0,-116,1037],[256,-116,1037],[256,116,1037],[0,116,1037]];
+  const E = [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]];
+  for (const [i, j] of E) {
+    const a = proj(B[i]), b = proj(B[j]);
+    ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+  }
+  // trajectories
+  for (const p of ps) {
+    const c = pcat(p.pdg).rgb;
+    const w = Math.min(4, 1 + Math.log10(1 + p.mom_gev * 10));
+    ctx.strokeStyle = `rgba(${c[0]},${c[1]},${c[2]},0.85)`;
+    ctx.lineWidth = w * devicePixelRatio;
+    const a = proj(p.start), b = proj(p.end);
+    ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+  }
+  // neutrino vertex
+  const v = proj(ctr);
+  ctx.fillStyle = "#F5F1E8";
+  ctx.beginPath(); ctx.arc(v[0], v[1], 4 * devicePixelRatio, 0, 7); ctx.fill();
+  ctx.strokeStyle = "#FFD54F"; ctx.lineWidth = devicePixelRatio;
+  ctx.beginPath(); ctx.arc(v[0], v[1], 8 * devicePixelRatio, 0, 7); ctx.stroke();
+}
+
+const c3d = document.getElementById("c3d");
+let dragging = false, lx = 0, ly = 0;
+c3d.addEventListener("mousedown", e => { dragging = true; lx = e.clientX; ly = e.clientY; });
+window.addEventListener("mouseup", () => dragging = false);
+window.addEventListener("mousemove", e => {
+  if (!dragging) return;
+  rotY += (e.clientX - lx) * 0.01; rotX += (e.clientY - ly) * 0.01;
+  lx = e.clientX; ly = e.clientY;
+  window._last && draw3D(window._last);
+});
+c3d.addEventListener("wheel", e => {
+  e.preventDefault();
+  zoom *= e.deltaY < 0 ? 1.1 : 0.9;
+  window._last && draw3D(window._last);
+}, { passive: false });
+
+function setMode(btnOn, btnOff, fn) {
+  document.getElementById(btnOn).classList.add("on");
+  document.getElementById(btnOff).classList.remove("on");
+  fn(); window._last && render(window._last);
+}
+document.getElementById("bCharge").onclick = () => setMode("bCharge","bTruth", () => colorMode="charge");
+document.getElementById("bTruth").onclick = () => setMode("bTruth","bCharge", () => colorMode="truth");
+document.getElementById("b2d").onclick = () => setMode("b2d","b3d", () => viewMode="2d");
+document.getElementById("b3d").onclick = () => setMode("b3d","b2d", () => viewMode="3d");
 
 function loadFile(file) {
   const r = new FileReader();
