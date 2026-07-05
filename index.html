@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>NuView — LArTPC Event Display</title>
+<style>
+  body { background:#0A0514; color:#F5F1E8; font-family:system-ui,sans-serif;
+         margin:0; padding:16px; }
+  h1 { font-size:18px; color:#00E5D0; margin:0 0 4px; letter-spacing:1px; }
+  #meta { font-size:13px; color:#9a8fb8; margin-bottom:10px; min-height:18px; }
+  .plane { margin-bottom:14px; }
+  .plane label { font-size:12px; color:#FFD54F; display:block; margin-bottom:3px; }
+  canvas { background:#120a24; border:1px solid #2a1b4d; border-radius:6px;
+           width:100%; display:block; }
+  #drop { border:1px dashed #6A1B9A; border-radius:8px; padding:10px 14px;
+          font-size:13px; color:#c9bfe0; margin-bottom:14px; }
+  input[type=file] { color:#c9bfe0; font-size:13px; }
+</style>
+</head>
+<body>
+<h1>NUVIEW · LArTPC EVENT DISPLAY</h1>
+<div id="meta">Load an event JSON produced by extract_event.py</div>
+<div id="drop">Drop event JSON here or <input type="file" id="file" accept=".json"></div>
+<div class="plane"><label>Plane 0 (induction U) — wire vs drift time</label>
+  <canvas id="c0" height="220"></canvas></div>
+<div class="plane"><label>Plane 1 (induction V) — wire vs drift time</label>
+  <canvas id="c1" height="220"></canvas></div>
+<div class="plane"><label>Plane 2 (collection Y) — wire vs drift time</label>
+  <canvas id="c2" height="220"></canvas></div>
+<script>
+"use strict";
+// Charge colormap: void -> violet -> teal -> gold -> ivory
+function cmap(t) {
+  const stops = [
+    [0.00, [26, 11, 61]], [0.35, [106, 27, 154]],
+    [0.65, [0, 229, 208]], [0.85, [255, 213, 79]], [1.00, [245, 241, 232]]
+  ];
+  for (let i = 1; i < stops.length; i++) {
+    if (t <= stops[i][0]) {
+      const [t0, c0] = stops[i-1], [t1, c1] = stops[i];
+      const u = (t - t0) / (t1 - t0);
+      return c0.map((v, k) => Math.round(v + u * (c1[k] - v)));
+    }
+  }
+  return stops[stops.length - 1][1];
+}
+
+function drawPlane(canvas, d) {
+  const ctx = canvas.getContext("2d");
+  canvas.width = canvas.clientWidth * devicePixelRatio;
+  canvas.height = 220 * devicePixelRatio;
+  ctx.fillStyle = "#120a24";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  if (!d || d.wire.length === 0) return;
+  const pad = 8 * devicePixelRatio;
+  const W = canvas.width - 2 * pad, H = canvas.height - 2 * pad;
+  const wmin = Math.min(...d.wire), wmax = Math.max(...d.wire);
+  const tmin = Math.min(...d.time), tmax = Math.max(...d.time);
+  // charge scale: clip at 97th percentile so one bright hit doesn't wash out the rest
+  const sorted = [...d.charge].sort((a, b) => a - b);
+  const qhi = sorted[Math.floor(sorted.length * 0.97)] || 1;
+  const qlo = sorted[0];
+  const px = Math.max(1.2 * devicePixelRatio, W / (wmax - wmin + 1));
+  for (let i = 0; i < d.wire.length; i++) {
+    const x = pad + (d.wire[i] - wmin) / (wmax - wmin || 1) * W;
+    const y = pad + (1 - (d.time[i] - tmin) / (tmax - tmin || 1)) * H;
+    const q = Math.min(1, Math.max(0, (d.charge[i] - qlo) / (qhi - qlo || 1)));
+    const [r, g, b] = cmap(q);
+    ctx.fillStyle = `rgba(${r},${g},${b},${0.35 + 0.65 * q})`;
+    ctx.fillRect(x, y, px, px);
+  }
+}
+
+function render(data) {
+  const m = data.meta;
+  const pdg = { 12: "νe", 14: "νμ", "-12": "ν̄e", "-14": "ν̄μ" }[m.nu_pdg] || m.nu_pdg;
+  document.getElementById("meta").textContent =
+    `run/subrun/event ${m.event_id.join("/")} · ${pdg} ` +
+    `${m.is_cc ? "CC" : "NC"} · Eν = ${m.nu_energy_gev.toFixed(2)} GeV · ` +
+    `vertex (${m.nu_vtx_cm.map(v => v.toFixed(0)).join(", ")}) cm · ` +
+    `${["0","1","2"].reduce((n,p) => n + data.planes[p].wire.length, 0)} hits`;
+  for (const p of ["0", "1", "2"])
+    drawPlane(document.getElementById("c" + p), data.planes[p]);
+  window._last = data;
+}
+
+function loadFile(file) {
+  const r = new FileReader();
+  r.onload = () => render(JSON.parse(r.result));
+  r.readAsText(file);
+}
+
+document.getElementById("file").addEventListener("change",
+  e => e.target.files[0] && loadFile(e.target.files[0]));
+document.getElementById("drop").addEventListener("dragover", e => e.preventDefault());
+document.getElementById("drop").addEventListener("drop", e => {
+  e.preventDefault();
+  if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+});
+window.addEventListener("resize", () => window._last && render(window._last));
+</script>
+</body>
+</html>
