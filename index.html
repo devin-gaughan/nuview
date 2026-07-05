@@ -47,7 +47,7 @@
   <canvas id="c2" height="220"></canvas></div>
 </div>
 <div id="view3d" style="display:none">
-  <label style="font-size:12px;color:#FFD54F">True particle trajectories — drag to orbit, wheel to zoom</label>
+  <label style="font-size:12px;color:#FFD54F">True particle trajectories — drag to orbit, shift-drag or right-drag to pan, wheel to zoom, R to reset</label>
   <canvas id="c3d" height="520"></canvas>
 </div>
 <script>
@@ -190,8 +190,8 @@ function render(data) {
   window._last = data;
 }
 
-// --- minimal 3D: orthographic projection with drag-orbit, no dependencies ---
-let rotY = 0.6, rotX = 0.35, zoom = 1;
+// --- minimal 3D: orthographic projection with drag-orbit/pan, no dependencies ---
+let rotY = 0.6, rotX = 0.35, zoom = 1, panX = 0, panY = 0;
 function draw3D(data) {
   const cv = document.getElementById("c3d"), ctx = cv.getContext("2d");
   cv.width = cv.clientWidth * devicePixelRatio;
@@ -207,7 +207,8 @@ function draw3D(data) {
     const x = v[0] - ctr[0], y = v[1] - ctr[1], z = v[2] - ctr[2];
     const x1 = x * cy + z * sy, z1 = -x * sy + z * cy;
     const y1 = y * cx - z1 * sx;
-    return [cv.width / 2 + x1 * S, cv.height / 2 - y1 * S];
+    return [cv.width / 2 + x1 * S + panX * devicePixelRatio,
+            cv.height / 2 - y1 * S + panY * devicePixelRatio];
   };
   // detector outline (MicroBooNE active volume, cm)
   ctx.strokeStyle = "rgba(106,27,154,0.5)"; ctx.lineWidth = devicePixelRatio;
@@ -236,12 +237,18 @@ function draw3D(data) {
 }
 
 const c3d = document.getElementById("c3d");
-let dragging = false, lx = 0, ly = 0;
-c3d.addEventListener("mousedown", e => { dragging = true; lx = e.clientX; ly = e.clientY; });
-window.addEventListener("mouseup", () => dragging = false);
+let dragging = false, panning = false, lx = 0, ly = 0;
+c3d.addEventListener("mousedown", e => {
+  panning = e.shiftKey || e.button === 2 || e.button === 1;
+  dragging = !panning;
+  lx = e.clientX; ly = e.clientY;
+});
+c3d.addEventListener("contextmenu", e => e.preventDefault());
+window.addEventListener("mouseup", () => { dragging = false; panning = false; });
 window.addEventListener("mousemove", e => {
-  if (!dragging) return;
-  rotY += (e.clientX - lx) * 0.01; rotX += (e.clientY - ly) * 0.01;
+  if (!dragging && !panning) return;
+  if (panning) { panX += e.clientX - lx; panY += e.clientY - ly; }
+  else { rotY += (e.clientX - lx) * 0.01; rotX += (e.clientY - ly) * 0.01; }
   lx = e.clientX; ly = e.clientY;
   window._last && draw3D(window._last);
 });
@@ -250,6 +257,12 @@ c3d.addEventListener("wheel", e => {
   zoom *= e.deltaY < 0 ? 1.1 : 0.9;
   window._last && draw3D(window._last);
 }, { passive: false });
+window.addEventListener("keydown", e => {
+  if (e.key === "r" || e.key === "R") {
+    rotY = 0.6; rotX = 0.35; zoom = 1; panX = 0; panY = 0;
+    window._last && viewMode === "3d" && draw3D(window._last);
+  }
+});
 
 function setMode(btnOn, btnOff, fn) {
   document.getElementById(btnOn).classList.add("on");

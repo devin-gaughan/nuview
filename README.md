@@ -4,6 +4,17 @@ Browser-based event display for liquid argon TPC neutrino data, starting with
 the MicroBooNE public samples. Part of the Auraeon project family:
 interactive visualizations of physical systems.
 
+Existing LArTPC event displays are desktop applications tied to the ROOT /
+LArSoft software stack. NuView takes the opposite approach: a single HTML file
+with zero dependencies that runs in any browser, fed by a small Python script
+that converts open-data HDF5 events to JSON. No framework installs, no
+experiment credentials — anyone can inspect real simulated neutrino
+interactions in under five minutes.
+
+![Three wire-plane views, truth-mode coloring](docs/screenshot_2d.png)
+
+![3D true-trajectory view](docs/screenshot_3d.png)
+
 ## Quick start
 
 1. Download a MicroBooNE open-sample HDF5 file (NoWire variant is sufficient):
