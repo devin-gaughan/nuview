@@ -28,8 +28,9 @@
 <body>
 <h1>NUVIEW · LArTPC EVENT DISPLAY</h1>
 <div id="meta">Load an event JSON produced by extract_event.py</div>
-<div id="drop">Drop event JSON here or <input type="file" id="file" accept=".json"></div>
+<div id="drop">Drop event JSON files here or <input type="file" id="file" accept=".json" multiple></div>
 <div id="bar">
+  <select id="evsel" style="background:#1A0B3D;color:#c9bfe0;border:1px solid #6A1B9A;border-radius:5px;padding:4px 8px;margin-right:10px;font-size:12px;display:none"></select>
   <button id="bCharge" class="on">Charge</button>
   <button id="bTruth">Truth</button>
   <button id="b2d" class="on">2D Planes</button>
@@ -203,18 +204,34 @@ document.getElementById("bTruth").onclick = () => setMode("bTruth","bCharge", ()
 document.getElementById("b2d").onclick = () => setMode("b2d","b3d", () => viewMode="2d");
 document.getElementById("b3d").onclick = () => setMode("b3d","b2d", () => viewMode="3d");
 
+const store = [];
+function addEvent(data) {
+  store.push(data);
+  const sel = document.getElementById("evsel");
+  sel.style.display = "";
+  const m = data.meta;
+  const opt = document.createElement("option");
+  opt.value = store.length - 1;
+  opt.textContent = `#${m.event_index} · ${m.nu_energy_gev.toFixed(2)} GeV`;
+  sel.appendChild(opt);
+  sel.value = store.length - 1;
+  render(data);
+}
+document.getElementById("evsel").addEventListener("change",
+  e => render(store[+e.target.value]));
+
 function loadFile(file) {
   const r = new FileReader();
-  r.onload = () => render(JSON.parse(r.result));
+  r.onload = () => addEvent(JSON.parse(r.result));
   r.readAsText(file);
 }
 
 document.getElementById("file").addEventListener("change",
-  e => e.target.files[0] && loadFile(e.target.files[0]));
+  e => [...e.target.files].forEach(loadFile));
 document.getElementById("drop").addEventListener("dragover", e => e.preventDefault());
 document.getElementById("drop").addEventListener("drop", e => {
   e.preventDefault();
-  if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+  [...e.dataTransfer.files].forEach(loadFile);
 });
 window.addEventListener("resize", () => window._last && render(window._last));
 </script>
