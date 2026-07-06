@@ -241,8 +241,22 @@ function draw3D(data) {
   ctx.fillStyle = "rgba(201,191,224,0.75)";
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
   const mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-  const m1 = mid(proj(B[0]), proj(B[4]));
-  ctx.fillText("10.4 m (z, beam →)", m1[0], m1[1] - 10 * dpr);
+  const pA = proj(B[0]), pB = proj(B[4]);
+  const m1 = mid(pA, pB);
+  ctx.fillText("10.4 m (z, beam)", m1[0], m1[1] - 12 * dpr);
+  // beam arrowhead drawn on the box edge, along the true projected +z direction
+  const dzx = pB[0] - pA[0], dzy = pB[1] - pA[1];
+  const dl = Math.hypot(dzx, dzy);
+  if (dl > 30 * dpr) {
+    const ux = dzx / dl, uy = dzy / dl;
+    const tipx = m1[0] + ux * 10 * dpr, tipy = m1[1] + uy * 10 * dpr;
+    ctx.strokeStyle = "rgba(201,191,224,0.9)"; ctx.lineWidth = 1.5 * dpr;
+    ctx.beginPath();
+    ctx.moveTo(tipx - (ux * 7 + uy * 4) * dpr, tipy - (uy * 7 - ux * 4) * dpr);
+    ctx.lineTo(tipx, tipy);
+    ctx.lineTo(tipx - (ux * 7 - uy * 4) * dpr, tipy - (uy * 7 + ux * 4) * dpr);
+    ctx.stroke();
+  }
   const m2 = mid(proj(B[0]), proj(B[1]));
   ctx.fillText("2.6 m (x, drift)", m2[0], m2[1] + 12 * dpr);
   const m3 = mid(proj(B[1]), proj(B[2]));
